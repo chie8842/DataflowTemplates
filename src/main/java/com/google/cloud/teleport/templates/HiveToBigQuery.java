@@ -16,8 +16,22 @@
 
 package com.google.cloud.teleport.templates;
 
+import com.google.cloud.teleport.templates.common.JavascriptTextTransformer.JavascriptTextTransformerOptions;
 import java.util.HashMap;
 import java.util.Map;
+import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.PipelineResult;
+import org.apache.beam.sdk.io.hcatalog.HCatalogIO;
+import org.apache.beam.sdk.options.Description;
+import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.transforms.SimpleFunction;
+import org.apache.beam.sdk.values.PCollection;
+import org.apache.hive.hcatalog.data.HCatRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 //import java.io.IOException;
 //import com.google.api.services.bigquery.model.TableRow;
 //import com.google.auto.value.AutoValue;
@@ -25,36 +39,24 @@ import java.util.Map;
 //import com.google.cloud.teleport.kafka.connector.KafkaIO;
 //import com.google.cloud.teleport.templates.common.BigQueryConverters.FailsafeJsonToTableRow;
 //import com.google.cloud.teleport.templates.common.JavascriptTextTransformer.FailsafeJavascriptUdf;
-import com.google.cloud.teleport.templates.common.JavascriptTextTransformer.JavascriptTextTransformerOptions;
 //import com.google.cloud.teleport.util.DualInputNestedValueProvider;
 //import com.google.cloud.teleport.util.DualInputNestedValueProvider.TranslatorInput;
 //import com.google.cloud.teleport.util.ResourceUtils;
 //import com.google.cloud.teleport.util.ValueProviderUtils;
 //import com.google.cloud.teleport.values.FailsafeElement;
-import org.apache.beam.sdk.Pipeline;
-import org.apache.beam.sdk.PipelineResult;
 //import org.apache.beam.sdk.coders.CoderRegistry;
 //import org.apache.beam.sdk.coders.KvCoder;
 //import org.apache.beam.sdk.coders.StringUtf8Coder;
 //import org.apache.beam.sdk.io.hcatalog.HCatToRow;
-import org.apache.beam.sdk.io.hcatalog.HCatalogIO;
-import org.apache.hive.hcatalog.data.HCatRecord;
 //import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
 //import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write.CreateDisposition;
 //import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write.WriteDisposition;
 //import org.apache.beam.sdk.io.gcp.bigquery.WriteResult;
-import org.apache.beam.sdk.options.Description;
-import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.sdk.options.PipelineOptionsFactory;
 //import org.apache.beam.sdk.options.ValueProvider;
-import org.apache.beam.sdk.transforms.PTransform;
-import org.apache.beam.sdk.values.PCollection;
 //import org.apache.kafka.common.serialization.StringDeserializer;
 //import org.joda.time.DateTimeZone;
 //import org.joda.time.format.DateTimeFormat;
 //import org.joda.time.format.DateTimeFormatter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * The {@link HiveToBigQuery} pipeline is a streaming pipeline which ingests data in JSON format
