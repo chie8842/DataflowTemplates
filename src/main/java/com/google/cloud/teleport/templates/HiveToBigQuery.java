@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
+import org.apache.beam.sdk.io.hcatalog.HCatToRow;
 import org.apache.beam.sdk.io.hcatalog.HCatalogIO;
 import org.apache.beam.sdk.io.hdfs.HadoopFileSystemOptions;
 import org.apache.beam.sdk.options.Description;
@@ -30,6 +31,7 @@ import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.Row;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -187,27 +189,26 @@ public class HiveToBigQuery {
 
     Map<String, String> configProperties = new HashMap<String, String>();
     configProperties.put("hive.metastore.uris", options.getMetastoreUri());
-    PCollection<HCatRecord> p =
+    PCollection<Row> p =
         pipeline
             .apply(
                 "Read from Hive source",
-                    HCatalogIO.read()
-                            .withConfigProperties(configProperties)
-                            .withDatabase(options.getHiveDatabaseName())
-                            .withTable(options.getHiveTableName()));
+                    HCatToRow.fromSpec(
+                            HCatalogIO.read()
+                                    .withConfigProperties(configProperties)
+                                    .withDatabase(options.getHiveDatabaseName())
+                                    .withTable(options.getHiveTableName())));
                             //.withPartition(partitionValues)
                             //.withBatchSize(1024L)
                             //.withFilter(filterString)
             //.apply(new HCatToRow());
-      p = p.apply("print", MapElements.<HCatRecord, HCatRecord>via(
-              new SimpleFunction<HCatRecord, HCatRecord>(){
+      p = p.apply("print", MapElements.<Row, Row>via(
+              new SimpleFunction<Row, Row>(){
                 @Override
-                public HCatRecord apply(HCatRecord r) {
+                public Row apply(Row r) {
                   //try {
                   System.out.println(r);
                   System.out.println(r.getClass().getName());
-                  System.out.println(r.getAll());
-                  System.out.println(r.getAll().getClass().getName());
                   return r;
                   //}
                   /*catch (IOException e) {
