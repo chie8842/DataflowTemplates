@@ -205,6 +205,7 @@ public class HiveToBigQuery {
                 public HCatRecord apply(HCatRecord r) {
                   //try {
                   System.out.println(r);
+                  System.out.println(r.getClass().getName());
                   return r;
                   //}
                   /*catch (IOException e) {
