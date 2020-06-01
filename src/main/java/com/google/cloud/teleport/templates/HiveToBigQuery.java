@@ -206,6 +206,8 @@ public class HiveToBigQuery {
                   //try {
                   System.out.println(r);
                   System.out.println(r.getClass().getName());
+                  System.out.println(r.getAll());
+                  System.out.println(r.getAll().getClass().getName());
                   return r;
                   //}
                   /*catch (IOException e) {
