@@ -17,17 +17,22 @@
 package com.google.cloud.teleport.templates;
 
 import com.google.cloud.teleport.templates.common.JavascriptTextTransformer.JavascriptTextTransformerOptions;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.io.hcatalog.HCatalogIO;
+import org.apache.beam.sdk.io.hdfs.HadoopFileSystemOptions;
 import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hive.hcatalog.data.HCatRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -115,7 +120,8 @@ public class HiveToBigQuery {
    * The {@link Options} class provides the custom execution options passed by the executor at the
    * command-line.
    */
-  public interface Options extends PipelineOptions, JavascriptTextTransformerOptions {
+  public interface Options extends HadoopFileSystemOptions,
+          JavascriptTextTransformerOptions {
     @Description("hive metastore uri")
     String getMetastoreUri();
 
@@ -145,13 +151,15 @@ public class HiveToBigQuery {
   /**
    * The main entry-point for pipeline execution. This method will start the pipeline but will not
    * wait for it's execution to finish. If blocking execution is required, use the {@link
-   * HiveToBigQuery#run(Options)} method to start the pipeline and invoke {@code
+   * HiveToBigQuery#run(Options)} method to start the pipeline and invoke
+   * {@code
    * result.waitUntilFinish()} on the {@link PipelineResult}.
    *
    * @param args The command-line args passed by the executor.
    */
   public static void main(String[] args) {
-    Options options = PipelineOptionsFactory.fromArgs(args).withValidation().as(Options.class);
+    Options options =
+            PipelineOptionsFactory.fromArgs(args).withValidation().as(Options.class);
 
     run(options);
   }
@@ -168,6 +176,13 @@ public class HiveToBigQuery {
 
   public static PipelineResult run(Options options) {
 
+    Configuration hadoopConf = new Configuration();
+    hadoopConf.set("fs.defaultFS", "hdfs:///");
+    hadoopConf.set("fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName());
+    hadoopConf.set("fs.file.impl",org.apache.hadoop.fs.LocalFileSystem.class.getName());
+    hadoopConf.set("fs.gs.impl", "com.google.cloud.hadoop.fs.gcs" +
+            ".GoogleHadoopFileSystem");
+    options.setHdfsConfiguration(Collections.singletonList(hadoopConf));
     Pipeline pipeline = Pipeline.create(options);
 
     Map<String, String> configProperties = new HashMap<String, String>();
