@@ -184,6 +184,8 @@ public class HiveToBigQuery {
     hadoopConf.set("fs.file.impl",org.apache.hadoop.fs.LocalFileSystem.class.getName());
     hadoopConf.set("fs.gs.impl", "com.google.cloud.hadoop.fs.gcs" +
             ".GoogleHadoopFileSystem");
+    hadoopConf.set("fs.AbstractFileSystem.gs.impl", "com.google.cloud.hadoop" +
+            ".fs.gcs.GoogleHadoopFS");
     options.setHdfsConfiguration(Collections.singletonList(hadoopConf));
     Pipeline pipeline = Pipeline.create(options);
 
