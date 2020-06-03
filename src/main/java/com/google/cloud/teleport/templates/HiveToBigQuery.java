@@ -209,6 +209,7 @@ public class HiveToBigQuery {
     p.apply(BigQueryIO.<Row>write()
             .withSchema(BigQueryUtils.toTableSchema(p.getSchema()))
             .withFormatFunction(BigQueryUtils.toTableRow())
+	    .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_IF_NEEDED)
             .to(options.getOutputTable())
     );
     //  p = p.apply("print", MapElements.<Row, Row>via(
