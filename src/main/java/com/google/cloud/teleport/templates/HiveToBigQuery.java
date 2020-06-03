@@ -22,6 +22,8 @@ import java.util.HashMap;
 import java.util.Map;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryUtils;
 import org.apache.beam.sdk.io.hcatalog.HCatToRow;
 import org.apache.beam.sdk.io.hcatalog.HCatalogIO;
 import org.apache.beam.sdk.io.hdfs.HadoopFileSystemOptions;
@@ -204,21 +206,26 @@ public class HiveToBigQuery {
                             //.withBatchSize(1024L)
                             //.withFilter(filterString)
             //.apply(new HCatToRow());
-      p = p.apply("print", MapElements.<Row, Row>via(
-              new SimpleFunction<Row, Row>(){
-                @Override
-                public Row apply(Row r) {
-                  //try {
-                  System.out.println(r);
-                  System.out.println(r.getClass().getName());
-                  return r;
-                  //}
-                  /*catch (IOException e) {
-                    throw new RuntimeException("aaa", e);
-                  }*/
-                }
-              }
-      ));
+    p.apply(BigQueryIO.<Row>write()
+            .withSchema(BigQueryUtils.toTableSchema(p.getSchema()))
+            .withFormatFunction(BigQueryUtils.toTableRow())
+            .to(options.getOutputTable())
+    );
+    //  p = p.apply("print", MapElements.<Row, Row>via(
+    //          new SimpleFunction<Row, Row>(){
+    //            @Override
+    //            public Row apply(Row r) {
+    //              //try {
+    //              System.out.println(r);
+    //              System.out.println(r.getClass().getName());
+    //              return r;
+    //              //}
+    //              /*catch (IOException e) {
+    //                throw new RuntimeException("aaa", e);
+    //              }*/
+    //            }
+    //          }
+    //  ));
 
             /*
              * Step #2: Transform the Kafka Messages into TableRows
