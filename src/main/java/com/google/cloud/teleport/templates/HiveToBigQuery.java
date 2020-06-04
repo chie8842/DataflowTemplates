@@ -16,19 +16,26 @@
 
 package com.google.cloud.teleport.templates;
 
+import com.google.cloud.teleport.templates.common.JavascriptTextTransformer;
 import com.google.cloud.teleport.templates.common.JavascriptTextTransformer.JavascriptTextTransformerOptions;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write.CreateDisposition;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write.WriteDisposition;
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryInsertError;
+import org.apache.beam.sdk.io.gcp.bigquery.InsertRetryPolicy;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryUtils;
 import org.apache.beam.sdk.io.hcatalog.HCatToRow;
 import org.apache.beam.sdk.io.hcatalog.HCatalogIO;
 import org.apache.beam.sdk.io.hdfs.HadoopFileSystemOptions;
 import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.Row;
 import org.apache.hadoop.conf.Configuration;
@@ -62,51 +69,78 @@ import org.slf4j.LoggerFactory;
 //import org.joda.time.format.DateTimeFormatter;
 
 /**
- * The {@link HiveToBigQuery} pipeline is a streaming pipeline which ingests data in JSON format
- * from Kafka, executes a UDF, and outputs the resulting records to BigQuery. Any errors which occur
- * in the transformation of the data or execution of the UDF will be output to a separate errors
- * table in BigQuery. The errors table will be created if it does not exist prior to execution. Both
- * output and error tables are specified by the user as template parameters.
+ * The {@link HiveToBigQuery} pipeline is a batch pipeline which ingests data
+ * from Hive and outputs the resulting records to BigQuery.
  *
  * <p><b>Pipeline Requirements</b>
  *
  * <ul>
- *   <li>The Kafka topic exists and the message is encoded in a valid JSON format.
+ *   <li>The Hive input table exists.
  *   <li>The BigQuery output table exists.
+ *   <li>The Hive metastore and HDFS URI are reachable from the Dataflow owrker
+ *   machines.
  * </ul>
  *
  * <p><b>Example Usage</b>
  *
  * <pre>
- * # Set the pipeline vars
- * PROJECT_ID=PROJECT ID HERE
- * BUCKET_NAME=BUCKET NAME HERE
- * PIPELINE_FOLDER=gs://${BUCKET_NAME}/dataflow/pipelines/kafka-to-bigquery
  *
- * # Set the runner
- * RUNNER=DataflowRunner
+ * # Set some environment variables
+ * PROJECT=my-project
+ * TEMP_BUCKET=my-temp-bucket
+ * INPUT_HIVE_DATABASE=mydatabase
+ * INPUT_HIVE_TABLE=mytable
+ * OUTPUT_TABLE=${PROJECT}:my_dataset.my_table
+ * PARTITION_COLS=["col1","col2"]
+ * FILTER_STRING=my-string
  *
- * # Build the template
- * mvn compile exec:java \
- * -Dexec.mainClass=com.google.cloud.teleport.templates.KafkaToBigQuery \
- * -Dexec.cleanupDaemonThreads=false \
- * -Dexec.args=" \
- * --project=${PROJECT_ID} \
- * --stagingLocation=${PIPELINE_FOLDER}/staging \
- * --tempLocation=${PIPELINE_FOLDER}/temp \
- * --templateLocation=${PIPELINE_FOLDER}/template \
- * --runner=${RUNNER}"
+ * # Set containerization vars
+ * IMAGE_NAME=my-image-name
+ * TARGET_GCR_IMAGE=gcr.io/${PROJECT}/${IMAGE_NAME}
+ * BASE_CONTAINER_IMAGE=my-base-container-image
+ * BASE_CONTAINER_IMAGE_VERSION=my-base-container-image-version
+ * APP_ROOT=/path/to/app-root
+ * COMMAND_SPEC=/path/to/command-spec
  *
- * # Execute the template
- * JOB_NAME=kafka-to-bigquery-$USER-`date +"%Y%m%d-%H%M%S%z"`
+ * # Build and upload image
+ * mvn clean package \
+ * -Dimage=${TARGET_GCR_IMAGE} \
+ * -Dbase-container-image=${BASE_CONTAINER_IMAGE} \
+ * -Dbase-container-image.version=${BASE_CONTAINER_IMAGE_VERSION} \
+ * -Dapp-root=${APP_ROOT} \
+ * -Dcommand-spec=${COMMAND_SPEC}
  *
- * gcloud dataflow jobs run ${JOB_NAME} \
- * --gcs-location=${PIPELINE_FOLDER}/template \
- * --zone=us-east1-d \
- * --parameters \
- * "bootstrapServers=my_host:9092,inputTopic=kafka-test,\
- * outputTableSpec=kafka-test:kafka.kafka_to_bigquery,\
- * outputDeadletterTable=kafka-test:kafka.kafka_to_bigquery_deadletter"
+ * # Create an image spec in GCS that contains the path to the image
+ * {
+ *    "docker_template_spec": {
+ *       "docker_image": $TARGET_GCR_IMAGE
+ *     }
+ *  }
+ *
+ * # Execute template:
+ * API_ROOT_URL="https://dataflow.googleapis.com"
+ * TEMPLATES_LAUNCH_API="${API_ROOT_URL}/v1b3/projects/${PROJECT}/templates:launch"
+ * JOB_NAME="kafka-to-bigquery`date +%Y%m%d-%H%M%S-%N`"
+ *
+ * time curl -X POST -H "Content-Type: application/json"     \
+ *     -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+ *     "${TEMPLATES_LAUNCH_API}"`
+ *     `"?validateOnly=false"`
+ *     `"&dynamicTemplate.gcsPath=${TEMP_BUCKET}/path/to/image-spec"`
+ *     `"&dynamicTemplate.stagingLocation=${TEMP_BUCKET}/staging" \
+ *     -d '
+ *      {
+ *       "jobName":"'$JOB_NAME'",
+ *       "parameters": {
+ *           "metastoreUri":"thrift://my_host:9083",
+ *           "hiveDatabaseName":"'$INPUT_HIVE_DATABASE'",
+ *           "hiveTableName":"'$INPUT_HIVE_TABLE'",
+ *           "partitionCols":"'$PARTITION_COLS'",
+ *           "filterString":"'$FILTER_STRING'",
+ *           "outputTable":"'$OUTPUT_TABLE'"
+ *        }
+ *       }
+ *      '
  * </pre>
  */
 public class HiveToBigQuery {
@@ -135,15 +169,20 @@ public class HiveToBigQuery {
 
     void setHiveTableName(String value);
 
+    @Description("the names of the columns that are partitions")
+    List<java.lang.String> getPartitionCols();
+
+    void setPartitionCols(String value);
+
+    @Description("the filter details")
+    String getFilterString();
+
+    void setFilterString(String value);
+
     @Description("Output topic to write to")
     String getOutputTable();
 
     void setOutputTable(String value);
-
-    @Description("Temporary directory for BigQuery loading process")
-    String getBigQueryLoadingTemporaryDirectory();
-
-    void setBigQueryLoadingTemporaryDirectory(String value);
   }
 
   /**
@@ -174,6 +213,7 @@ public class HiveToBigQuery {
 
   public static PipelineResult run(Options options) {
 
+    // Set Hadoop configurations
     Configuration hadoopConf = new Configuration();
     hadoopConf.set("fs.defaultFS", "hdfs:///");
     hadoopConf.set("fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName());
@@ -183,80 +223,40 @@ public class HiveToBigQuery {
     hadoopConf.set("fs.AbstractFileSystem.gs.impl", "com.google.cloud.hadoop" +
             ".fs.gcs.GoogleHadoopFS");
     options.setHdfsConfiguration(Collections.singletonList(hadoopConf));
+
+    // Create the pipeline
     Pipeline pipeline = Pipeline.create(options);
 
     Map<String, String> configProperties = new HashMap<String, String>();
     configProperties.put("hive.metastore.uris", options.getMetastoreUri());
     PCollection<Row> p =
         pipeline
+            /*
+             * Step #1: Read hive table rows from Hive.
+             */
             .apply(
                 "Read from Hive source",
                     HCatToRow.fromSpec(
                             HCatalogIO.read()
                                     .withConfigProperties(configProperties)
                                     .withDatabase(options.getHiveDatabaseName())
-                                    .withTable(options.getHiveTableName())));
-                            //.withPartition(partitionValues)
-                            //.withBatchSize(1024L)
-                            //.withFilter(filterString)
-            //.apply(new HCatToRow());
-    p.apply(BigQueryIO.<Row>write()
+                                    .withTable(options.getHiveTableName())
+                                    .withPartitionCols(options.getPartitionCols())
+                                    .withFilter(options.getFilterString())));
+    /*
+     * Step #2: Write table rows out to BigQuery
+     */
+    p.apply(
+            "Write records to BigQuery",
+            BigQueryIO.<Row>write()
             .withSchema(BigQueryUtils.toTableSchema(p.getSchema()))
             .withFormatFunction(BigQueryUtils.toTableRow())
-            .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_IF_NEEDED)
+            .withCreateDisposition(CreateDisposition.CREATE_IF_NEEDED)
+            .withWriteDisposition(WriteDisposition.WRITE_APPEND)
+            .withExtendedErrorInfo()
+            .withFailedInsertRetryPolicy(InsertRetryPolicy.retryTransientErrors())
             .to(options.getOutputTable())
     );
-    //  p = p.apply("print", MapElements.<Row, Row>via(
-    //          new SimpleFunction<Row, Row>(){
-    //            @Override
-    //            public Row apply(Row r) {
-    //              //try {
-    //              System.out.println(r);
-    //              System.out.println(r.getClass().getName());
-    //              return r;
-    //              //}
-    //              /*catch (IOException e) {
-    //                throw new RuntimeException("aaa", e);
-    //              }*/
-    //            }
-    //          }
-    //  ));
-
-            /*
-             * Step #2: Transform the Kafka Messages into TableRows
-             */
-            //.apply("ConvertMessageToTableRow", new MessageToTableRow
-    // (options));
-
-    /*
-     * Step #3: Write the successful records out to BigQuery
-     */
-    //transformOut
-    //    .get(TRANSFORM_OUT)
-    //    .apply(
-    //        "WriteSuccessfulRecords",
-    //        BigQueryIO.writeTableRows()
-    //            .withoutValidation()
-    //            .withCreateDisposition(CreateDisposition.CREATE_NEVER)
-    //            .withWriteDisposition(WriteDisposition.WRITE_APPEND)
-    //            .to(options.getOutputTableSpec()));
-
-    ///*
-    // * Step #4: Write failed records out to BigQuery
-    // */
-    //PCollectionList.of(transformOut.get(UDF_DEADLETTER_OUT))
-    //    .and(transformOut.get(TRANSFORM_DEADLETTER_OUT))
-    //    .apply("Flatten", Flatten.pCollections())
-    //    .apply(
-    //        "WriteFailedRecords",
-    //        WriteKafkaMessageErrors.newBuilder()
-    //            .setErrorRecordsTable(
-    //                ValueProviderUtils.maybeUseDefaultDeadletterTable(
-    //                    options.getOutputDeadletterTable(),
-    //                    options.getOutputTableSpec(),
-    //                    DEFAULT_DEADLETTER_TABLE_SUFFIX))
-    //            .setErrorRecordsTableSchema(ResourceUtils.getDeadletterTableSchemaJson())
-    //            .build());
     return pipeline.run();
   }
 }
