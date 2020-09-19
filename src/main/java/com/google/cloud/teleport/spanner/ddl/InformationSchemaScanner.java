@@ -81,6 +81,17 @@ public class InformationSchemaScanner {
       builder.createTable(tableName).foreignKeys(tableForeignKeys.build()).endTable();
     }
 
+    Map<String, NavigableMap<String, CheckConstraint>> checkConstraints = listCheckConstraints();
+    for (Map.Entry<String, NavigableMap<String, CheckConstraint>> tableEntry :
+        checkConstraints.entrySet()) {
+      String tableName = tableEntry.getKey();
+      ImmutableList.Builder<String> constraints = ImmutableList.builder();
+      for (Map.Entry<String, CheckConstraint> entry : tableEntry.getValue().entrySet()) {
+        constraints.add(entry.getValue().prettyPrint());
+      }
+      builder.createTable(tableName).checkConstraints(constraints.build()).endTable();
+    }
+
     return builder.build();
   }
 
@@ -128,9 +139,11 @@ public class InformationSchemaScanner {
         context.executeQuery(
             Statement.newBuilder(
                     "SELECT c.table_name, c.column_name,"
-                        + " c.ordinal_position, c.spanner_type, c.is_nullable"
+                        + " c.ordinal_position, c.spanner_type, c.is_nullable,"
+                        + " c.is_generated, c.generation_expression, c.is_stored"
                         + " FROM information_schema.columns as c"
                         + " WHERE c.table_catalog = '' AND c.table_schema = '' "
+                        + " AND c.spanner_state = 'COMMITTED' "
                         + " ORDER BY c.table_name, c.ordinal_position")
                 .build());
     while (resultSet.next()) {
@@ -138,11 +151,19 @@ public class InformationSchemaScanner {
       String columnName = resultSet.getString(1);
       String spannerType = resultSet.getString(3);
       boolean nullable = resultSet.getString(4).equalsIgnoreCase("YES");
+      boolean isGenerated = resultSet.getString(5).equalsIgnoreCase("ALWAYS");
+      String generationExpression = resultSet.isNull(6) ? "" : resultSet.getString(6);
+      boolean isStored = resultSet.isNull(7)
+          ?
+          false : resultSet.getString(7).equalsIgnoreCase("YES");
       builder
           .createTable(tableName)
           .column(columnName)
           .parseType(spannerType)
           .notNull(!nullable)
+          .isGenerated(isGenerated)
+          .generationExpression(generationExpression)
+          .isStored(isStored)
           .endColumn()
           .endTable();
     }
@@ -310,5 +331,37 @@ public class InformationSchemaScanner {
       foreignKey.columnsBuilder().add(column);
       foreignKey.referencedColumnsBuilder().add(referencedColumn);
     }
+  }
+
+  private Map<String, NavigableMap<String, CheckConstraint>> listCheckConstraints() {
+    Map<String, NavigableMap<String, CheckConstraint>> checkConstraints = Maps.newHashMap();
+    ResultSet resultSet =
+        context.executeQuery(
+            Statement.of(
+                "SELECT ctu.TABLE_NAME,"
+                    + " cc.CONSTRAINT_NAME,"
+                    + " cc.CHECK_CLAUSE"
+                    + " FROM INFORMATION_SCHEMA.CONSTRAINT_TABLE_USAGE as ctu"
+                    + " INNER JOIN INFORMATION_SCHEMA.CHECK_CONSTRAINTS as cc"
+                    + " ON ctu.constraint_catalog = cc.constraint_catalog"
+                    + " AND ctu.constraint_schema = cc.constraint_schema"
+                    + " AND ctu.CONSTRAINT_NAME = cc.CONSTRAINT_NAME"
+                    + " WHERE NOT STARTS_WITH(cc.CONSTRAINT_NAME, 'CK_IS_NOT_NULL_')"
+                    + " AND ctu.table_catalog = ''"
+                    + " AND ctu.table_schema = ''"
+                    + " AND ctu.constraint_catalog = ''"
+                    + " AND ctu.constraint_schema = ''"
+                    + " AND cc.SPANNER_STATE = 'COMMITTED'"
+                    + ";"));
+    while (resultSet.next()) {
+      String table = resultSet.getString(0);
+      String name = resultSet.getString(1);
+      String expression = resultSet.getString(2);
+      Map<String, CheckConstraint> tableCheckConstraints =
+          checkConstraints.computeIfAbsent(table, k -> Maps.newTreeMap());
+      tableCheckConstraints.computeIfAbsent(
+          name, k -> CheckConstraint.builder().name(name).expression(expression).build());
+    }
+    return checkConstraints;
   }
 }

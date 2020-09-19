@@ -21,7 +21,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.text.IsEqualIgnoringWhiteSpace.equalToIgnoringWhiteSpace;
 import static org.junit.Assert.assertThat;
 
-import com.google.cloud.spanner.Type;
+import com.google.cloud.teleport.spanner.common.Type;
 import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
@@ -44,12 +44,15 @@ public class DdlTest {
         .column("id").int64().notNull().endColumn()
         .column("first_name").string().size(10).endColumn()
         .column("last_name").type(Type.string()).max().endColumn()
+        .column("full_name").type(Type.string()).max()
+        .generatedAs("CONCAT(first_name, ' ', last_name)").stored().endColumn()
         .primaryKey().asc("id").end()
         .indexes(ImmutableList.of("CREATE INDEX `UsersByFirstName` ON `Users` (`first_name`)"))
         .foreignKeys(
             ImmutableList.of(
                 "ALTER TABLE `Users` ADD CONSTRAINT `fk` FOREIGN KEY (`first_name`)"
                     + " REFERENCES `AllowedNames` (`first_name`)"))
+        .checkConstraints(ImmutableList.of("CONSTRAINT `ck` CHECK (`first_name` != `last_name`)"))
         .endTable()
         .build();
     assertThat(
@@ -59,6 +62,8 @@ public class DdlTest {
                 + " `id` INT64 NOT NULL,"
                 + " `first_name` STRING(10),"
                 + " `last_name` STRING(MAX),"
+                + " `full_name` STRING(MAX) AS (CONCAT(first_name, ' ', last_name)) STORED,"
+                + " CONSTRAINT `ck` CHECK (`first_name` != `last_name`),"
                 + " ) PRIMARY KEY (`id` ASC)"
                 + " CREATE INDEX `UsersByFirstName` ON `Users` (`first_name`)"
                 + " ALTER TABLE `Users` ADD CONSTRAINT `fk` FOREIGN KEY (`first_name`)"

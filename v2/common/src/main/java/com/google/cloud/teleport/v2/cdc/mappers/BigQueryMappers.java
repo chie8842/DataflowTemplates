@@ -17,11 +17,8 @@
 package com.google.cloud.teleport.v2.cdc.mappers;
 
 import com.google.api.services.bigquery.model.TableRow;
-import com.google.cloud.bigquery.LegacySQLTypeName;
 import com.google.cloud.bigquery.TableId;
 import com.google.cloud.teleport.v2.transforms.BigQueryConverters;
-import java.util.HashMap;
-import java.util.Map;
 import org.apache.beam.sdk.values.KV;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,15 +96,9 @@ public class BigQueryMappers {
     public KV<TableId, TableRow> getOutputObject(TableRow input) {
       TableId tableId = getTableId(input);
       TableRow tableRow = getTableRow(input);
+      TableRow cleanedTableRow = getCleanedTableRow(tableId, tableRow);
 
-      return KV.of(tableId, tableRow);
-    }
-    /* Return a HashMap with the Column->Column Type Mapping required from the source
-        Implementing getSchema will allow the mapper class to support your desired format
-    */
-    @Override
-    public Map<String, LegacySQLTypeName> getInputSchema(TableRow input) {
-      return new HashMap<String, LegacySQLTypeName>();
+      return KV.of(tableId, cleanedTableRow);
     }
   }
 
@@ -130,14 +121,11 @@ public class BigQueryMappers {
     }
     @Override
     public KV<TableId, TableRow> getOutputObject(KV<TableId, TableRow> input) {
-      return input;
-    }
-    /* Return a HashMap with the Column->Column Type Mapping required from the source
-        Implementing getSchema will allow the mapper class to support your desired format
-    */
-    @Override
-    public Map<String, LegacySQLTypeName> getInputSchema(KV<TableId, TableRow> input) {
-      return new HashMap<String, LegacySQLTypeName>();
+      TableId tableId = getTableId(input);
+      TableRow tableRow = getTableRow(input);
+      TableRow cleanedTableRow = getCleanedTableRow(tableId, tableRow);
+
+      return KV.of(tableId, cleanedTableRow);
     }
   }
 }

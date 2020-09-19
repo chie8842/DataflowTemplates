@@ -27,9 +27,9 @@ import static org.junit.Assert.assertThat;
 import com.google.cloud.spanner.BatchClient;
 import com.google.cloud.spanner.BatchReadOnlyTransaction;
 import com.google.cloud.spanner.TimestampBound;
-import com.google.cloud.spanner.Type;
 import com.google.cloud.teleport.spanner.IntegrationTest;
 import com.google.cloud.teleport.spanner.SpannerServerResource;
+import com.google.cloud.teleport.spanner.common.Type;
 import com.google.common.collect.HashMultimap;
 import java.util.Arrays;
 import java.util.Collections;
@@ -270,6 +270,22 @@ public class InformationSchemaScannerTest {
     assertThat(ddl.prettyPrint(), equalToIgnoringWhiteSpace(String.join("", statements)));
   }
 
+  // TODO: enable this test once CHECK constraints are enabled
+  // @Test
+  public void checkConstraints() throws Exception {
+    List<String> statements =
+        Arrays.asList(
+            "CREATE TABLE `T` ("
+                + " `id`     INT64 NOT NULL,"
+                + " `A`      INT64 NOT NULL,"
+                + " CONSTRAINT `ck` CHECK(A>0),"
+                + " ) PRIMARY KEY (`id` ASC)");
+
+    spannerServer.createDatabase(dbId, statements);
+    Ddl ddl = getDatabaseDdl();
+    assertThat(ddl.prettyPrint(), equalToIgnoringWhiteSpace(String.join("", statements)));
+  }
+
   @Test
   public void commitTimestamp() throws Exception {
     String statement =
@@ -277,6 +293,20 @@ public class InformationSchemaScannerTest {
             + " `id`                                    INT64 NOT NULL,"
             + " `birthday`                              TIMESTAMP NOT NULL "
             + " OPTIONS (allow_commit_timestamp=TRUE),"
+            + " ) PRIMARY KEY (`id` ASC)";
+
+    spannerServer.createDatabase(dbId, Collections.singleton(statement));
+    Ddl ddl = getDatabaseDdl();
+    assertThat(ddl.prettyPrint(), equalToIgnoringWhiteSpace(statement));
+  }
+
+  // TODO: enable this test once generated columns are supported.
+  // @Test
+  public void generatedColumns() throws Exception {
+        String statement =
+        "CREATE TABLE `T` ("
+            + " `id`                                     INT64 NOT NULL,"
+            + " `generated`                              INT64 NOT NULL AS (`id`) STORED, "
             + " ) PRIMARY KEY (`id` ASC)";
 
     spannerServer.createDatabase(dbId, Collections.singleton(statement));
